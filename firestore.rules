@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userRole() { return signedIn() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : null; }
+    function isOwner() { return userRole() == 'proprietaire'; }
+    function isTenant() { return userRole() == 'locataire'; }
+    function ownsTenant(tenantId) { return isOwner() && get(/databases/$(database)/documents/locataires/$(tenantId)).data.proprietaireId == request.auth.uid; }
+    function isOwnTenant(tenantId) { return isTenant() && get(/databases/$(database)/documents/locataires/$(tenantId)).data.uid == request.auth.uid; }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && request.auth.uid == uid;
+    }
+    match /locataires/{tenantId} {
+      allow read: if ownsTenant(tenantId) || isOwnTenant(tenantId);
+      allow update: if isOwnTenant(tenantId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['numeroAbonneSoneb', 'numeroCompteurSbee', 'fcmToken']);
+      allow create, delete: if ownsTenant(tenantId);
+    }
+    match /biens/{bienId} { allow read, write: if isOwner() && resource.data.proprietaireId == request.auth.uid; }
+    match /logements/{logementId} { allow read, write: if isOwner() && resource.data.proprietaireId == request.auth.uid; }
+    match /paiements/{paymentId} {
+      allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+    match /facturesSoneb/{invoiceId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow write: if false; }
+    match /rechargesSbee/{rechargeId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow write: if false; }
+    match /incidents/{incidentId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow create: if signedIn() && (isOwner() || isTenant()); allow update: if isOwner(); }
+    match /techniciens/{technicianId} { allow read: if signedIn(); allow write: if isOwner(); }
+  }
+}
