@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ConfirmationResult, RecaptchaVerifier, createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPhoneNumber } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/client";
 
 export function AuthCard({ register = false }: { register?: boolean }) {
@@ -29,8 +29,11 @@ export function AuthCard({ register = false }: { register?: boolean }) {
         document.cookie = `bailio-role=${role}; path=/; max-age=2592000; samesite=lax`;
         router.push(role === "locataire" ? "/locataire/dashboard" : "/dashboard");
       } else {
-        await signInWithEmailAndPassword(auth, String(form.get("email") ?? ""), String(form.get("password") ?? ""));
-        router.push("/dashboard");
+        const credential = await signInWithEmailAndPassword(auth, String(form.get("email") ?? ""), String(form.get("password") ?? ""));
+        const profile = await getDoc(doc(db, "users", credential.user.uid));
+        const accountRole = profile.data()?.role === "locataire" ? "locataire" : "proprietaire";
+        document.cookie = `bailio-role=${accountRole}; path=/; max-age=2592000; samesite=lax`;
+        router.push(accountRole === "locataire" ? "/locataire/dashboard" : "/dashboard");
       }
     } catch (exception) {
       const message = exception instanceof Error ? exception.message : "Une erreur est survenue.";
