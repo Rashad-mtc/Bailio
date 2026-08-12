@@ -28,5 +28,10 @@ service cloud.firestore {
     match /rechargesSbee/{rechargeId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow write: if false; }
     match /incidents/{incidentId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow create: if signedIn() && (isOwner() || isTenant()); allow update: if isOwner(); }
     match /techniciens/{technicianId} { allow read: if signedIn(); allow write: if isOwner(); }
+    match /invitations/{invitationId} {
+      allow read: if resource.data.status == 'active' || signedIn();
+      allow create: if isOwner() && request.resource.data.proprietaireId == request.auth.uid;
+      allow update: if signedIn() && (isOwner() || request.resource.data.usedBy == request.auth.uid);
+    }
   }
 }
