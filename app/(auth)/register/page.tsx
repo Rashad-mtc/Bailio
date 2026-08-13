@@ -1,3 +1,3 @@
 import { Suspense } from "react";
 import { AuthCard } from "@/components/auth-card";
-export default function RegisterPage() { return <Suspense><AuthCard initialMode="register" /></Suspense>; }
+export default function RegisterPage() { return <Suspense><AuthCard expectedRole="proprietaire" initialMode="register" /></Suspense>; }

@@ -11,15 +11,15 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow create: if signedIn() && request.auth.uid == uid;
-      allow update: if signedIn() && request.auth.uid == uid;
+      allow update: if signedIn() && (request.auth.uid == uid || (isOwner() && resource.data.role == 'locataire' && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['proprietaireId', 'logementId'])));
     }
     match /locataires/{tenantId} {
       allow read: if ownsTenant(tenantId) || isOwnTenant(tenantId);
       allow update: if isOwnTenant(tenantId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['numeroAbonneSoneb', 'numeroCompteurSbee', 'fcmToken']);
       allow create, delete: if ownsTenant(tenantId);
     }
-    match /biens/{bienId} { allow read, write: if isOwner() && resource.data.proprietaireId == request.auth.uid; }
-    match /logements/{logementId} { allow read, write: if isOwner() && resource.data.proprietaireId == request.auth.uid; }
+    match /biens/{bienId} { allow read: if isOwner() && resource.data.proprietaireId == request.auth.uid; allow create: if isOwner() && request.resource.data.proprietaireId == request.auth.uid; allow update, delete: if isOwner() && resource.data.proprietaireId == request.auth.uid; }
+    match /logements/{logementId} { allow read: if isOwner() && resource.data.proprietaireId == request.auth.uid; allow create: if isOwner() && request.resource.data.proprietaireId == request.auth.uid; allow update, delete: if isOwner() && resource.data.proprietaireId == request.auth.uid; }
     match /paiements/{paymentId} {
       allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid);
       allow write: if false;
@@ -28,10 +28,14 @@ service cloud.firestore {
     match /rechargesSbee/{rechargeId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow write: if false; }
     match /incidents/{incidentId} { allow read: if isOwner() || (isTenant() && resource.data.uid == request.auth.uid); allow create: if signedIn() && (isOwner() || isTenant()); allow update: if isOwner(); }
     match /techniciens/{technicianId} { allow read: if signedIn(); allow write: if isOwner(); }
-    match /invitations/{invitationId} {
-      allow read: if resource.data.status == 'active' || signedIn();
-      allow create: if isOwner() && request.resource.data.proprietaireId == request.auth.uid;
-      allow update: if signedIn() && (isOwner() || request.resource.data.usedBy == request.auth.uid);
+    match /codesVerification/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid;
+    }
+    match /demandesRattachement/{requestId} {
+      allow create: if signedIn() && request.resource.data.locataireUid == request.auth.uid;
+      allow read: if signedIn() && (resource.data.locataireUid == request.auth.uid || isOwner());
+      allow update: if signedIn() && (isOwner() || resource.data.locataireUid == request.auth.uid);
     }
   }
 }

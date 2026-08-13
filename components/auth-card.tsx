@@ -3,61 +3,47 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { GoogleAuthProvider, createUserWithEmailAndPassword, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signOut } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/client";
 
 type Role = "proprietaire" | "locataire";
+type Country = { flag: string; name: string; code: string };
+const countries: Country[] = [
+  { flag: "🇧🇯", name: "Bénin", code: "+229" }, { flag: "🇧🇫", name: "Burkina Faso", code: "+226" }, { flag: "🇨🇲", name: "Cameroun", code: "+237" }, { flag: "🇰🇲", name: "Comores", code: "+269" }, { flag: "🇨🇬", name: "Congo-Brazzaville", code: "+242" }, { flag: "🇨🇮", name: "Côte d’Ivoire", code: "+225" }, { flag: "🇩🇯", name: "Djibouti", code: "+253" }, { flag: "🇬🇦", name: "Gabon", code: "+241" }, { flag: "🇬🇳", name: "Guinée", code: "+224" }, { flag: "🇬🇶", name: "Guinée équatoriale", code: "+240" }, { flag: "🇲🇬", name: "Madagascar", code: "+261" }, { flag: "🇲🇱", name: "Mali", code: "+223" }, { flag: "🇲🇷", name: "Mauritanie", code: "+222" }, { flag: "🇳🇪", name: "Niger", code: "+227" }, { flag: "🇨🇫", name: "République centrafricaine", code: "+236" }, { flag: "🇨🇩", name: "RD Congo", code: "+243" }, { flag: "🇷🇼", name: "Rwanda", code: "+250" }, { flag: "🇸🇳", name: "Sénégal", code: "+221" }, { flag: "🇹🇩", name: "Tchad", code: "+235" }, { flag: "🇹🇬", name: "Togo", code: "+228" },
+];
 
 function accountEmail(phone: string) { return `${phone.replace(/\D/g, "")}@accounts.bailio.local`; }
+function makeCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 
-export function AuthCard({ expectedRole, initialMode = "login" }: { expectedRole?: Role; initialMode?: "login" | "register" }) {
+export function AuthCard({ expectedRole, initialMode = "login" }: { expectedRole: Role; initialMode?: "login" | "register" }) {
   const router = useRouter();
-  const role = expectedRole ?? "proprietaire";
-  const [mode, setMode] = useState(initialMode);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [mode, setMode] = useState(initialMode); const [loading, setLoading] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState(""); const [googleUser, setGoogleUser] = useState<{ uid: string; email: string | null } | null>(null);
+
+  async function createVerification(uid: string) { const code = makeCode(); await setDoc(doc(db, "codesVerification", uid), { uid, code, statut: "en_attente", createdAt: Date.now(), expiresAt: Date.now() + 600000 }); return code; }
+  async function finish(uid: string, role: Role, status: string) { document.cookie = `bailio-role=${role}; path=/; max-age=2592000; samesite=lax`; document.cookie = `bailio-status=${status}; path=/; max-age=2592000; samesite=lax`; if (status !== "actif") router.push(`/verification?uid=${uid}`); else router.push(role === "locataire" ? "/locataire/dashboard" : "/dashboard"); }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setLoading(true); setError(""); setNotice("");
-    const form = new FormData(event.currentTarget);
-    const phone = String(form.get("phone") ?? "");
-    const email = accountEmail(phone);
+    event.preventDefault(); setLoading(true); setError(""); setNotice(""); const form = new FormData(event.currentTarget); const country = countries.find((item) => item.code === form.get("country")) ?? countries[0]; const phone = `${country.code}${String(form.get("phone") ?? "")}`; const email = accountEmail(phone);
     try {
       if (mode === "register") {
-        const invitationCode = String(form.get("invitationCode") ?? "").trim().toUpperCase();
-        if (role === "locataire" && !invitationCode) throw new Error("INVITATION_REQUIRED");
-        let invitation: Record<string, unknown> | null = null;
-        if (role === "locataire") {
-          const invitationSnapshot = await getDoc(doc(db, "invitations", invitationCode));
-          if (!invitationSnapshot.exists() || invitationSnapshot.data().status !== "active") throw new Error("INVITATION_INVALID");
-          invitation = invitationSnapshot.data();
-        }
         const credential = await createUserWithEmailAndPassword(auth, email, String(form.get("password") ?? ""));
-        await setDoc(doc(db, "users", credential.user.uid), { uid: credential.user.uid, nom: form.get("name"), telephone: phone, email, role, proprietaireId: invitation?.proprietaireId ?? null, logementId: invitation?.logementId ?? null, createdAt: new Date().toISOString() });
-        if (invitation) await setDoc(doc(db, "invitations", invitationCode), { ...invitation, status: "used", usedBy: credential.user.uid }, { merge: true });
+        await setDoc(doc(db, "users", credential.user.uid), { uid: credential.user.uid, nom: form.get("name"), telephone: phone, email, role: expectedRole, statut: "en_attente", createdAt: new Date().toISOString() });
+        const code = await createVerification(credential.user.uid); setNotice(`Code de vérification envoyé. Code de test local : ${code}`); router.push(`/verification?uid=${credential.user.uid}`);
       } else {
-        const credential = await signInWithEmailAndPassword(auth, email, String(form.get("password") ?? ""));
-        const profileSnapshot = await getDoc(doc(db, "users", credential.user.uid));
-        const actualRole = profileSnapshot.data()?.role;
-        if (actualRole !== role) { await signOut(auth); throw new Error(role === "locataire" ? "WRONG_OWNER_SPACE" : "WRONG_TENANT_SPACE"); }
+        const credential = await signInWithEmailAndPassword(auth, email, String(form.get("password") ?? "")); const profile = await getDoc(doc(db, "users", credential.user.uid)); const data = profile.data();
+        if (data?.role !== expectedRole) { await signOut(auth); throw new Error(expectedRole === "locataire" ? "WRONG_OWNER_SPACE" : "WRONG_TENANT_SPACE"); }
+        await finish(credential.user.uid, expectedRole, data?.statut ?? "en_attente");
       }
-      document.cookie = `bailio-role=${role}; path=/; max-age=2592000; samesite=lax`;
-      router.push(role === "locataire" ? "/locataire/dashboard" : "/dashboard");
-    } catch (exception) {
-      const code = exception instanceof Error ? exception.message : "";
-      const messages: Record<string, string> = { INVITATION_REQUIRED: "Le code d’invitation fourni par votre propriétaire est obligatoire.", INVITATION_INVALID: "Ce code d’invitation est invalide ou a déjà été utilisé.", WRONG_OWNER_SPACE: "Ce compte est un compte locataire. Connectez-vous depuis l’espace locataire.", WRONG_TENANT_SPACE: "Ce compte est un compte propriétaire. Connectez-vous depuis l’espace propriétaire." };
-      setError(messages[code] ?? "Impossible de finaliser cette opération. Vérifiez vos informations.");
-    } finally { setLoading(false); }
+    } catch (exception) { const code = exception instanceof Error ? exception.message : ""; const messages: Record<string, string> = { WRONG_OWNER_SPACE: "Ce compte est un compte locataire. Utilisez l’espace locataire.", WRONG_TENANT_SPACE: "Ce compte est un compte propriétaire. Utilisez l’espace propriétaire.", "auth/email-already-in-use": "Un compte existe déjà avec ce numéro.", "auth/invalid-credential": "Numéro de téléphone ou mot de passe incorrect." }; setError(messages[code] ?? "Impossible de finaliser cette opération. Vérifiez vos informations."); } finally { setLoading(false); }
   }
 
-  async function resetPassword() {
-    const phone = window.prompt("Entrez votre numéro de téléphone");
-    if (!phone) return;
-    try { await sendPasswordResetEmail(auth, accountEmail(phone)); setNotice("Un lien de réinitialisation a été envoyé si ce compte existe."); } catch { setError("Impossible d’envoyer le lien de réinitialisation."); }
-  }
+  async function googleSignIn() { setLoading(true); setError(""); try { const result = await signInWithPopup(auth, new GoogleAuthProvider()); const profile = await getDoc(doc(db, "users", result.user.uid)); const data = profile.data(); if (data?.role && data.role !== expectedRole) throw new Error(expectedRole === "locataire" ? "WRONG_OWNER_SPACE" : "WRONG_TENANT_SPACE"); if (!data?.telephone || !data?.role) { setGoogleUser({ uid: result.user.uid, email: result.user.email }); return; } await finish(result.user.uid, expectedRole, data.statut ?? "en_attente"); } catch (exception) { const code = exception instanceof Error ? exception.message : ""; setError(code === "WRONG_OWNER_SPACE" ? "Ce compte est un compte locataire. Utilisez l’espace locataire." : code === "WRONG_TENANT_SPACE" ? "Ce compte est un compte propriétaire. Utilisez l’espace propriétaire." : "Connexion Google impossible."); } finally { setLoading(false); } }
+  async function completeGoogle(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); setLoading(true); try { const form = new FormData(event.currentTarget); const country = countries.find((item) => item.code === form.get("country")) ?? countries[0]; const phone = `${country.code}${String(form.get("phone") ?? "")}`; await setDoc(doc(db, "users", googleUser!.uid), { uid: googleUser!.uid, email: googleUser!.email, telephone: phone, nom: form.get("name"), role: expectedRole, statut: "en_attente", createdAt: new Date().toISOString() }); const code = await createVerification(googleUser!.uid); setNotice(`Code de test local : ${code}`); router.push(`/verification?uid=${googleUser!.uid}`); } catch { setError("Impossible de compléter votre profil Google."); } finally { setLoading(false); } }
+  async function resetPassword() { const phone = window.prompt("Entrez votre numéro de téléphone"); if (!phone) return; try { await sendPasswordResetEmail(auth, accountEmail(phone)); setNotice("Un lien de réinitialisation a été envoyé si le compte existe."); } catch { setError("Impossible d’envoyer le lien de réinitialisation."); } }
 
-  const isTenant = role === "locataire";
-  return <main className="auth-page"><Link className="brand auth-brand" href="/"><span className="brand-mark">B</span><span>Bail<span className="brand-accent">io</span></span></Link><section className="auth-card"><div className="auth-card-heading"><span className="auth-symbol">{isTenant ? "♙" : "⌂"}</span><p className="eyebrow">ESPACE {isTenant ? "LOCATAIRE" : "PROPRIÉTAIRE"}</p><h1>{mode === "register" ? "Créer votre compte" : "Se connecter"}</h1><p>{isTenant ? "Accédez à vos loyers, factures et services." : "Gérez vos biens et vos locataires simplement."}</p></div><div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }} type="button">Se connecter</button><button className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setError(""); }} type="button">Créer un compte</button></div><form className="form-stack" onSubmit={submit}>{mode === "register" && <label>Nom complet<input name="name" type="text" placeholder="Votre nom et prénom" required /></label>}<label>Numéro de téléphone<input name="phone" type="tel" placeholder="+229 01 00 00 00 00" required /></label>{mode === "register" && isTenant && <label>Code d’invitation<input name="invitationCode" placeholder="Ex : BA-7K2P9M" required /></label>}<label>Mot de passe<input name="password" type="password" placeholder="Au moins 6 caractères" minLength={6} required /></label>{mode === "login" && <button className="forgot-password" onClick={resetPassword} type="button">Mot de passe oublié ?</button>}<button className="primary-button wide-button" disabled={loading} type="submit">{loading ? <><span className="button-spinner" />Chargement...</> : mode === "register" ? "Créer mon compte →" : "Se connecter →"}</button></form>{notice && <p className="form-notice">{notice}</p>}{error && <p className="form-error">{error}</p>}<p className="auth-switch">{isTenant ? "Vous êtes propriétaire ? " : "Vous êtes locataire ? "}<Link href={isTenant ? "/proprietaire/connexion" : "/locataire/connexion"}>Accéder à l’autre espace</Link></p></section><p className="auth-footer">Vos données sont protégées par Firebase Authentication.</p></main>;
+  const title = expectedRole === "locataire" ? "Espace locataire" : "Espace propriétaire";
+  return <main className="auth-page"><Link className="brand auth-brand" href="/"><span className="brand-mark">B</span><span>Bail<span className="brand-accent">io</span></span></Link><section className="auth-card"><div className="auth-card-heading"><span className="auth-symbol">{expectedRole === "locataire" ? "♙" : "⌂"}</span><p className="eyebrow">{title.toUpperCase()}</p><h1>{googleUser ? "Complétez votre profil" : mode === "register" ? "Créer votre compte" : "Se connecter"}</h1><p>{googleUser ? "Votre numéro et votre nom sont nécessaires." : "Un accès simple et sécurisé à votre espace."}</p></div>{googleUser ? <form className="form-stack" onSubmit={completeGoogle}><label>Nom complet<input name="name" required placeholder="Votre nom et prénom" /></label><PhoneFields /><button className="primary-button wide-button" disabled={loading} type="submit">Enregistrer mon profil →</button></form> : <><div className="auth-tabs"><button className={mode === "login" ? "active" : ""} onClick={() => setMode("login")} type="button">Se connecter</button><button className={mode === "register" ? "active" : ""} onClick={() => setMode("register")} type="button">Créer un compte</button></div><form className="form-stack" onSubmit={submit}>{mode === "register" && <label>Nom complet<input name="name" required placeholder="Votre nom et prénom" /></label>}<PhoneFields />{mode === "register" && <p className="auth-helper">Un code à 6 chiffres vous sera demandé après l’inscription.</p>}<label>Mot de passe<input name="password" type="password" minLength={6} required placeholder="Minimum 6 caractères" /></label>{mode === "login" && <button className="forgot-password" onClick={resetPassword} type="button">Mot de passe oublié ?</button>}<button className="primary-button wide-button" disabled={loading} type="submit">{loading ? <><span className="button-spinner" />Chargement...</> : mode === "register" ? "Créer mon compte →" : "Se connecter →"}</button></form><button className="google-button" disabled={loading} onClick={googleSignIn} type="button"><span>G</span>S’inscrire avec Google</button></>}{notice && <p className="form-notice">{notice}</p>}{error && <p className="form-error">{error}</p>}{!googleUser && <p className="auth-switch">{expectedRole === "locataire" ? "Vous êtes propriétaire ? " : "Vous êtes locataire ? "}<Link href={expectedRole === "locataire" ? "/proprietaire/connexion" : "/locataire/connexion"}>Autre espace</Link></p>}</section><p className="auth-footer">Vos données sont protégées par Firebase Authentication.</p></main>;
 }
+
+function PhoneFields() { return <div className="phone-fields"><select name="country" defaultValue="+229" aria-label="Indicatif téléphonique">{countries.map((country) => <option key={country.code} value={country.code}>{country.flag} {country.name} ({country.code})</option>)}</select><input name="phone" type="tel" inputMode="numeric" placeholder="01 00 00 00" required aria-label="Numéro de téléphone" /></div>; }
