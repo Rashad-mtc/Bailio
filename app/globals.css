@@ -51,6 +51,11 @@ a { color: inherit; text-decoration: none; }
 
 /* Bailio brand palette: orange replaces the former purple primary. */
 :root { --color-primary: #EA580C; --color-primary-dark: #C2410C; --color-primary-light: #FFEDD5; }
+.phone-fields { display: block; }
+.phone-fields .PhoneInput { display: flex; align-items: center; gap: 8px; }
+.phone-fields .PhoneInputCountry { border: 1px solid #e5e5eb; border-radius: 8px; padding: 11px 8px; background: #fff; }
+.phone-fields .PhoneInputInput { min-width: 0; width: 100%; border: 1px solid #e5e5eb; border-radius: 8px; padding: 12px; font: inherit; color: #353a47; outline: 0; }
+.phone-error { min-height: 13px; color: #b42318; font-size: 10px; margin: 5px 0 0; }
 .brand-mark, .primary-button, .welcome-banner, .rent-hero { background: var(--color-primary); }
 .brand-accent, .nav-item.active, .nav-item.active span, .section-heading a, .panel-heading a, .row-link { color: var(--color-primary); }
 .nav-item.active { background: var(--color-primary-light); }
